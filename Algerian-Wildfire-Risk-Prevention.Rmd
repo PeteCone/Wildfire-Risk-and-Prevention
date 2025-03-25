@@ -1,0 +1,399 @@
+---
+title: "Algerian_Forest_Fire_Final_Project"
+author: "Peter Conant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Living in this day, I am constantly reminded that global warming is creating a climate crisis. Growing up in the central valley of California fires and smoke are on the for front of my mind. It has always been a dream of mine to help prevent forest fires and protect our habitats with the skills I learn in this program. This is a great opportunity to apply what I am learning to a topic that is important to me. I will be approaching this project as though I am a environmental researching working with the California forest protection agency using Algerian data to try to understand the conditions of where and when fires will occur. I want to use the skills and strategies I have learned to find a better way to predict and prevent forest fires.
+
+## Source
+My project will be centered around the 'Algerian Forest Fires' found on UCI's Machine Learning Repository. The original article this data was collected for was 'Predicting Forest Fire in Algeria Using Data Mining Techniques: Case Study of the Decision Tree Algorithm' and completed a very similar task to the one I hope to complete. However they are using decision tree algorithms to make their predictions where as I hope to only use the data analyses tools we learn in this class.
+
+The data set is a collection of meteorological observations (observational study) across during June 2012 to September 2012 in Algerian. It regroups data sets that were collected in two regions: the Sidi Bel-abbas region and the Bejaia region. Each region had a total of 122 instances, each row represents a day observed, totaling to 244 instances.
+
+Temperature, relative humidity, wind speed, and rain are base data needed to calculate the codes: Fine FuelMoister Code, Duff Moister Code and Drought Code, which in turn are used to calculate the indexes: Initial Spread Index, Buildup Index, Fire Weather Index (FWI), a universal system for determining fire risk. I consider date, location, temperature, wind, relative humidity, fire, and rain to be raw data. In this project I will be using raw data to make my own predictions and comparing my results with the FWI.
+
+```{r}
+library(tidyverse)
+library(gridExtra)
+```
+
+
+## Data Quality
+We will begin by importing our data processing it.
+
+```{r}
+fires <- read.csv('Algerian_forest_fires_dataset.csv')
+
+fires <- as_tibble(fires)
+
+#summary
+print(head(fires), width = Inf)
+summary(fires)
+```
+
+First I will check for missing and duplicate values to remove them.
+
+```{r}
+fires_clean <- fires 
+
+#NA values
+fires_clean <- fires_clean %>% mutate(across(everything(), ~na_if(., "")))
+
+colSums(is.na(fires_clean))
+
+rows_with_na <- fires_clean[!complete.cases(fires_clean), ]
+
+# Print rows with NA values
+print(rows_with_na)
+```
+Three rows with NA values. The top two rows separate the regional data. The third has a NA Classes (fire) value. All will be removed
+
+```{r}
+fires_clean <- na.omit(fires_clean)
+
+colSums(is.na(fires_clean))
+
+#Remove second column name row
+fires_clean <- fires_clean[-123, ]
+
+#duplicates
+table(duplicated(fires_clean))
+```
+
+NA values removed and no duplicates found. The data is clean.
+
+The values of the Class column representing if there was a fire on that day should be changed to a binary 0 representing no fire and 1 for fire. This will make future calculations easier.
+
+```{r}
+
+fires_formatted <- fires_clean
+
+fires_formatted$Classes <- trimws(fires_formatted$Classes)
+
+fires_formatted$Classes<- replace(fires_formatted$Classes, fires_formatted$Classes == 'not fire', 0)
+fires_formatted$Classes<- replace(fires_formatted$Classes, fires_formatted$Classes == 'fire', 1)
+```
+
+I will turn all numeric character values into integers.
+```{r}
+fires_formatted <- fires_formatted %>%
+  mutate(across(where(is.character), as.numeric))
+```
+
+I can make a Date column out of the day month and year provided.
+```{r}
+fires_formatted$Date <- as.Date(paste(fires_formatted$year, fires_formatted$month, fires_formatted$day, sep = "-"), "%Y-%m-%d")
+```
+
+The data is split between two regions but there is no column to represent this. The first 122 rows represent the Bejaia region and rows 123 to 244 are from Sidi-Bel Abbes Region. I may make this column binary later when running calculations but I will leave it for now for readability.
+
+```{r}
+fires_formatted$Region <- NA
+
+fires_formatted$Region[1:122] <- "Bejaia"
+
+fires_formatted$Region[123:nrow(fires_formatted)] <- "Sidi-Bel Abbes"
+```
+
+I will also change the name of the columns to make it easier to read.
+```{r}
+colnames(fires_formatted) <- c('Day','Month','Year','Temperature','Relative Humidity','Wind Speed','Rain','Fine Fuel Moister Code','Duff Moister Code','Drought Code','Initial Spread Index','Buildup Index','Fire Weather Index','Fire','Date','Region')
+```
+
+```{r}
+print(head(fires_formatted), n = Inf, width = Inf)
+```
+
+## Exploratory Data Analysis
+
+Lets begin by computing summary statistics.
+```{r}
+#Variance
+numeric_variances <- fires_formatted %>%
+  summarise(across(where(is.numeric), var, na.rm = TRUE))
+
+print(numeric_variances, n = Inf, width = Inf)
+```
+```{r}
+
+getmode <- function(v) {
+  v <-v[!is.na(v)]
+  
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v,uniqv)))]
+}
+
+numeric_mode <- fires_formatted %>%
+  summarise(across(where(is.numeric), getmode))
+
+print(numeric_mode, n = Inf, width = Inf)
+```
+```{r}
+#Select one categorical variable, compute these statistics on a numeric variable by grouping on a categorical variable
+
+fires_formatted %>% summarise(mean_temp = mean(Temperature, na.rm = TRUE), median_temp = median(Temperature, na.rm = TRUE), sd_temp = sd(Temperature, na.rm = TRUE), range_temp = paste(range(Temperature), collapse = " - "), mode_temp = getmode(Temperature), var_temp = var(Temperature))
+fires_formatted %>% summarise(mean_rain = mean(Rain, na.rm = TRUE), median_rain = median(Rain, na.rm = TRUE), sd_rain = sd(Rain, na.rm = TRUE), range_rain = paste(range(Rain), collapse = " - "), mode_rain = getmode(Rain), var_wind = var(Rain))
+fires_formatted %>% summarise(mean_humidity = mean(`Relative Humidity`, na.rm = TRUE), median_humidity = median(`Relative Humidity`, na.rm = TRUE), sd_humidity = sd(`Relative Humidity`, na.rm = TRUE), range_humidity = paste(range(`Relative Humidity`), collapse = " - "), mode_humidity = getmode(`Relative Humidity`), var_humidity = var(`Relative Humidity`))
+fires_formatted %>% summarise(mean_wind = mean(`Wind Speed`, na.rm = TRUE), median_wind = median(`Wind Speed`, na.rm = TRUE), sd_wind = sd(`Wind Speed`, na.rm = TRUE), range_wind = paste(range(`Wind Speed`), collapse = " - "), mode_wind = getmode(`Wind Speed`), var_wind = var(`Wind Speed`))
+```
+
+
+It seems we have a mean temperature of 32 Celsius, an mean rain of .76 mm a day and a mean humidity of 62. Wind speeds can range from 6 - 29 km/h but typically stays between 12 and 18 km/h.
+
+Lets see the distribution of this data.
+```{r}
+ggplot(data = fires_formatted) + geom_histogram(mapping = aes(x = Temperature), binwidth = 1)+ labs(x = "Tempurature (C)", y = "count", title = "Tempature distribution (Both Regions)")
+```
+```{r}
+ggplot(data = fires_formatted) + geom_histogram(mapping = aes(x = Rain), binwidth = 1)+ labs(x = "Rain (mm)", y = "count", title = "Rain distribution (Both Regions)")
+```
+```{r}
+ggplot(data = fires_formatted) + geom_histogram(mapping = aes(x = `Relative Humidity`), binwidth = 1) + labs(x = "Relative Humidity (%)", y = "count", title = "Relative Humidity Distribution (Both Regions)")
+```
+```{r}
+ggplot(data = fires_formatted) + geom_histogram(mapping = aes(x = `Wind Speed`), binwidth = 1) + labs(x = "Wind Speed (km/h)", y = "count", title = "Wind Speed Distribution (Both Regions)")
+```
+
+We should get an idea of where and when fires happen. To get a sense for the total number distribution of fires of the time frame we'll do some visualizations.
+
+```{r}
+fires_formatted %>% group_by(Region) %>% summarize(fires_active = sum(Fire)) %>% ggplot(mapping = aes(x = Region, y = fires_active, fill=Region)) + geom_bar(stat = "identity") + coord_flip() + labs(x = "Region", y = "Number of Fires", title = "Fires by Region")
+```
+There are more fire in Sidi-Bel Abbes Bejaia.
+
+Lets break that data down into something a little more interesting.
+
+```{r}
+fires_formatted %>% group_by(Month) %>% summarize(fires_active = sum(Fire)) %>% ggplot(mapping = aes(x = Month, y = fires_active, fill=Month)) + geom_bar(stat = "identity") + coord_flip() + labs(x = "Month", y = "Number of Fires", title = "Total Fires by Month")
+```
+
+Fires peak in hottest month of the year, August the hottest days of the year. In the future we will likely be able to ignore date an focus on weather.
+
+Now I will do a little visualization of the indexes and codes to see see if they provide any useful insight. We will use color to indicate if a fire happened that day or not. I hope to find some correlation or tends among the data that I may explore later.
+
+```{r}
+plot1 <- ggplot(data = fires_formatted) + geom_point(mapping = aes(x = Date, y = `Duff Moister Code`, color = Region)) + geom_smooth(mapping = aes(x = Date, y = `Duff Moister Code`)) + labs(title = "Duff Moister Code Over Time")
+plot2 <- ggplot(data = fires_formatted) + geom_point(mapping = aes(x = Date, y = `Fine Fuel Moister Code`, color = Region)) + geom_smooth(mapping = aes(x = Date, y = `Fine Fuel Moister Code`)) + labs(title = "Fine Fuel Moister Code Over Time")
+plot3 <- ggplot(data = fires_formatted) + geom_point(mapping = aes(x = Date, y = `Drought Code`, color = Region)) + geom_smooth(mapping = aes(x = Date, y = `Drought Code`)) + labs(title = "Drought Code Over Time")
+plot4 <- ggplot(data = fires_formatted) + geom_point(mapping = aes(x = Date, y = `Initial Spread Index`, color = Region)) + geom_smooth(mapping = aes(x = Date, y = `Initial Spread Index`)) + labs(title = "Initial Spread Index Over Time")
+plot5 <- ggplot(data = fires_formatted) + geom_point(mapping = aes(x = Date, y = `Buildup Index`, color = Region)) + geom_smooth(mapping = aes(x = Date, y = `Buildup Index`)) + labs(title = "Build Up Index Over Time")
+plot6 <- ggplot(data = fires_formatted) + geom_point(mapping = aes(x = Date, y = `Fire Weather Index`, color = Region)) + geom_smooth(mapping = aes(x = Date, y = `Fire Weather Index`)) + labs(title = "Fire Weather Index Over Time")
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, ncol=2)
+```
+Most of these charts share the pattern of rising values with a peak in  mid August. This follows typical weather patterns of the northern hemisphere with dry with July August and September being the dryest hottest months. The one acceptation to the shape of our plots is the Fine Fuel Moister Code which peaks in early August. Many of the graphs seem to rise steadily and fall when rain occurs. Nothing from these graphs will help solve my questions or raises any more relevant questions.
+
+Lets see if either region have any outlines in the FWI.
+```{r}
+ggplot(data =  fires_formatted, mapping = aes(x = Region, y = `Fire Weather Index`)) + geom_boxplot() + coord_flip()
+```
+
+Average FWI are around 6 and 3 respectively with typically lower ranges being shared at about 1. Upper range and outter quartiles are very different between theses two regions. There are two outliers in the chart, they belong to the Bejaia Region. However they are withing upper bound of the Sida-Bel Abbes region. 
+
+## Hypotheses Testing
+
+I want to test two things using hypothesis testing. First I want to see if weather conditions when fires start are the same between the two regions. This will tell me if I can treat the two regions as the same or if i should seperate them in further tests. Second I want to see if USA guidelines apply to the regions I am applying my methods. The will assure me that the FWI applies to my region as well.
+
+According to the US National Weather Service, the first indicators to the Fire Watch of possible forest fires are a Relative humidity of 25% or less and a temperature of 75F or greater. These indicators suggest that fire conditions do not vary for location or climate. I would like to see if these indicators apply to my regions. I would also like to test if the mean of these key indicators are the same between the two regions on my data set. 
+
+First some visualization to ensure that this data has a normal distribution. 
+
+### Visualize Relative Humidity
+
+```{r}
+#Relative Humidity
+fires_temp = fires_formatted[which(fires_formatted$Fire == 1), ]
+ggplot(data = fires_temp) + geom_histogram(mapping = aes(x = `Relative Humidity`, groupby = Region), binwidth = 4)  + ggtitle("Relative Humidity on Fire Days") + xlab("Relative Humidity (%)") + ylab("Count")
+
+fires_rh <- fires_temp$`Relative Humidity` %>% as.data.frame()
+fires_rh %>% ggplot(aes(sample = fires_temp$`Relative Humidity`)) + stat_qq(distribution = stats::qnorm) + stat_qq_line() + labs(y = "sample quantiles", x = "theoretical quantiles", title = "QQ Plot of Relative Humidity on Fire Days") + theme(text = element_text(size = 16))
+```
+
+### Visualize Temperature
+
+```{r}
+#Temperature
+ggplot(data = fires_temp) + geom_histogram(mapping = aes(x = `Temperature`, groupby = Region), binwidth = 1) + ggtitle("Tempature Highs on Fire Days") + xlab("Temperature (C)") + ylab("Count")
+
+fires_temperature <- fires_temp$`Temperature` %>% as.data.frame()
+fires_temperature %>% ggplot(aes(sample = fires_temp$`Temperature`)) + stat_qq(distribution = stats::qnorm) + stat_qq_line() + labs(y = "sample quantiles", x = "theoretical quantiles", title = "QQ Plot of Tempature Highs on Fire Days") + theme(text = element_text(size = 16))
+
+```
+
+Both of the data sets have a normal distribution.
+
+### Hypothesis 1: Relative Humidity between Regions
+
+Null hypothesis: The mean relative humidity for all fires is the same in both regions(uA = uB). Alternate hypothesis, the regions have different humidity levels during fires (uA != uB).
+
+I will be using two sample two sided t-testing.
+```{r}
+Bejaia = subset(fires_formatted, Region == "Bejaia")
+Bejaia_fires_RH = Bejaia$`Relative Humidity`[Bejaia$Fire == 1]
+
+SidiBel = subset(fires_formatted, Region == "Sidi-Bel Abbes")
+SidiBel_fires_RH = SidiBel$`Relative Humidity`[SidiBel$Fire == 1]
+
+var.test(SidiBel_fires_RH, Bejaia_fires_RH)
+
+t.test(SidiBel_fires_RH, Bejaia_fires_RH, var.equal = FALSE)
+```
+We compare the variance of the two samples with var-test and determine the varaince between the two samples is not equal. We use this information in our t.test.
+
+In this two sided two sample t-test the test statistic is -6.136, the reference distribution is 129 and the p-value is 0.00007. the p-value is so low that we reject the null hypothesis for the alternative: The Regions have different mean Relative Humidity when fires start.
+
+
+
+
+### Hypothesis 2: Mean Tempature compared to US standards
+
+Now I would like to see if the conditions for temperature suggested by the National Weather (75F, 23.89C) service apply to our regions
+
+Null hypothesis: The US National Weather Service guidelines apply to our region and fires start above 23.89C in Bejaia and Sidi-Bel Abbes (uA >= 23.89). Alternate hypothesis, the US NWS guidlines do not apply to our region, fires tend to start at temperatures lower than 23.89(uA <23.89 ).
+```{r}
+
+fires_both_regions = fires_formatted$`Temperature`[fires_formatted$Fire == 1]
+
+t.test(fires_both_regions, mu = 23.89, alternative= "l")
+```
+
+From this one sided test and one sample t-test, the test statistic is 39.66. The reference distribution is 136. Our p-value is very high so we can accept the null hypothesis as true: the US National Weather Service guidelines apply to our region, fires start above 23.89C in our regions.
+
+
+## Logistical Regression
+
+In this section we want to find out if raw data can predict the event of a fire better than the Fire Weather Index. To complete this test we will use regression to predict Fires with raw data and the FWI and compare the r-sqaured values from training. For this study we will begin by testing on the Bejaia region, the more wooded and humid of the two regions.
+
+```{r}
+Bejaia %>% ggplot() + geom_point(mapping = aes(x = `Fire Weather Index`, y = Fire)) + ggtitle("Fires Against Fire Weather Index in Bejaia")
+```
+In the graph "Fires against Fire Weather Index" we can see values below 2 and above 5 clearly correlate with fires, while values within that index are less predictable. This should make for good results in our regression model.
+
+Lets measure how predictable Fires are with the FWI using r-squared.
+```{r}
+Bejaia$`Fire Weather Index_scaled` <- scale(Bejaia$`Fire Weather Index`)
+fitfwi.logit <- lm(Fire ~ `Fire Weather Index_scaled`, data = Bejaia, family = binomial(link = "logit"))
+summary(fitfwi.logit)
+```
+The FWI scores 57.72% in r-squared.
+
+Now we will conduct a similar analyses on the raw data individually.
+```{r}
+Bejaia$`Temperature_scaled` <- scale(Bejaia$`Temperature`)
+fittemp.logit <- lm(Fire ~ `Temperature_scaled`, data = Bejaia, family = binomial(link = "logit"))
+summary(fittemp.logit)
+```
+
+```{r}
+Bejaia$`Relative Humidity_scaled` <- scale(Bejaia$`Relative Humidity`)
+fitrh.logit <- lm(Fire ~ `Relative Humidity_scaled`, data = Bejaia, family = binomial(link = "logit"))
+summary(fitrh.logit)
+```
+
+```{r}
+Bejaia$`Rain_scaled` <- scale(Bejaia$`Rain`)
+fitrain.logit <- lm(Fire ~ `Rain_scaled`, data = Bejaia, family = binomial(link = "logit"))
+summary(fitrain.logit)
+```
+
+```{r}
+Bejaia$`Wind Speed_scaled` <- scale(Bejaia$`Wind Speed`)
+fitwind.logit <- lm(Fire ~ `Wind Speed_scaled`, data = Bejaia, family = binomial(link = "logit"))
+summary(fitwind.logit)
+```
+All of these raw date values score 25% or lower, much lower than the score of the FWI. Now lets combine all of the data points into a single regression model. I hope that by combining these into a regression model that we may improve fire prediction.
+```{r}
+
+fitmulti.logit <- lm(Fire ~ `Relative Humidity_scaled` + `Wind Speed_scaled` + `Rain_scaled` + `Temperature_scaled`, data = Bejaia, family = binomial(link = "logit"))
+summary(fitmulti.logit)
+```
+
+
+The accuracy of this model is slightly higher than the individual raw data regression models, however the model with the highest accuracy remains the FWI model, showing us that the FWI is the best way to predict a fire.
+
+I am curious to see if FWI is consistent in it's effectiveness across regions and climates. Lets run the FWI model on Sidi-Bel Abbes data and compare the r-squared scores.
+```{r}
+SidiBel$`Fire Weather Index_scaled` <- scale(SidiBel$`Fire Weather Index`)
+fitSBFWI.logit <- lm(Fire ~ `Fire Weather Index_scaled`, data = SidiBel, family = binomial(link = "logit"))
+summary(fitSBFWI.logit)
+```
+The FWI accuracy for Sidi-Bel Abbes is similar Bejaia suggesting FWI has a higher accuracy than raw data regardless of climate.
+
+Lets solidify this theory by running the multi-raw-data models on the Sidi-Bel Abbes regional data.
+```{r}
+SidiBel$`Relative Humidity_scaled` <- scale(SidiBel$`Relative Humidity`)
+SidiBel$`Rain_scaled` <- scale(SidiBel$`Rain`)
+SidiBel$`Temperature_scaled` <- scale(SidiBel$`Temperature`)
+SidiBel$`Wind Speed_scaled` <- scale(SidiBel$`Wind Speed`)
+fitSBmulti.logit <- lm(Fire ~ `Relative Humidity_scaled` + `Wind Speed_scaled` + `Rain_scaled` + `Temperature_scaled`, data = SidiBel)
+summary(fitSBmulti.logit)
+```
+Surprisingly the raw data multi-model preforms nearly as well as FWI. This suggests that regression is a viable option but there are some conditions.
+
+I will plot the fires of this region and calculate the r-squared value for the raw data in this region for more information.
+```{r}
+SidiBel %>% ggplot() + geom_point(mapping = aes(x = `Fire Weather Index`, y = Fire)) + ggtitle("Fires Against Fire Weather Index in Sidi Bel-abbas")
+```
+This plot is very similar to our previous plot, it tells us the FWI is working consistantly in both regions, but does not explain why the multi model regression preforms better in Sidi Bel-abbas.
+```{r}
+fitSBtemp.logit <- lm(Fire ~ `Temperature_scaled`, data = SidiBel, family = binomial(link = "logit"))
+summary(fitSBtemp.logit)
+```
+
+```{r}
+fitSBrh.logit <- lm(Fire ~ `Relative Humidity_scaled`, data = SidiBel, family = binomial(link = "logit"))
+summary(fitSBrh.logit)
+```
+
+```{r}
+fitSBrain.logit <- lm(Fire ~ `Rain_scaled`, data = SidiBel, family = binomial(link = "logit"))
+summary(fitSBrain.logit)
+```
+
+```{r}
+fitSBwind.logit <- lm(Fire ~ `Wind Speed_scaled`, data = SidiBel, family = binomial(link = "logit"))
+summary(fitSBwind.logit)
+```
+It seems that the r-squared values of Sidi Bel-abbas raw data are higher individually as well as collectively compared to Bejaia, meaning the region's fires are more predictable with raw data individually and colletivley. 
+
+Lets compare the distribution of these data in the two regions to see if there is any difference in distribution that could cause this.
+```{r}
+plot1 <- ggplot(data = Bejaia) + geom_histogram(mapping = aes(x = Temperature), binwidth = 1, fill = "forestgreen")+ labs(x = "Tempurature (C)", y = "Fires", title = "Tempature Distribution Bejaia")
+plot2 <- ggplot(data = SidiBel) + geom_histogram(mapping = aes(x = Temperature), binwidth = 1, fill = "deepskyblue4")+ labs(x = "Tempurature (C)", y = "Fires", title = "Tempature Distribution SidiBel")
+                                                                                                     
+plot3 <- ggplot(data = Bejaia) + geom_histogram(mapping = aes(x = Rain), binwidth = 1, fill = "forestgreen")+ labs(x = "Rain (mm)", y = "Fires", title = "Rain Distribution Bejaia")
+plot4 <- ggplot(data = SidiBel) + geom_histogram(mapping = aes(x = Rain), binwidth = 1, fill = "deepskyblue4")+ labs(x = "Rain (mm)", y = "Fires", title = "Rain Distribution SidiBel")
+
+plot5 <- ggplot(data = Bejaia) + geom_histogram(mapping = aes(x = `Relative Humidity`), binwidth = 1, fill = "forestgreen") + labs(x = "Relative Humidity (%)", y = "Fires", title = "Relative Humidity Distribution Bejaia")
+plot6 <- ggplot(data = SidiBel) + geom_histogram(mapping = aes(x = `Relative Humidity`), binwidth = 1, fill = "deepskyblue4") + labs(x = "Relative Humidity (%)", y = "Fires", title = "Relative Humidity Distribution SidiBel")
+
+plot7 <- ggplot(data = Bejaia) + geom_histogram(mapping = aes(x = `Wind Speed`), binwidth = 1, fill = "forestgreen") + labs(x = "Wind Speed (km/h)", y = "Fires", title = "Wind Speed Distribution Bejaia")
+plot8 <- ggplot(data = SidiBel) + geom_histogram(mapping = aes(x = `Wind Speed`), binwidth = 1, fill = "deepskyblue4") + labs(x = "Wind Speed (km/h)", y = "Fires", title = "Wind Speed Distribution SidiBel")
+
+options(repr.plot.width = 30, repr.plot.height = 10)
+
+grob <- grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, ncol=4, widths = c(10,10,10,10))
+```
+The only difference is in Wind Speed which has a very small r-square score individually and likely doesn't contribute much to the multi-model regression.
+```{r}
+ggsave("plots.png", grob, width = 15, height = 8, dpi = 300)
+```
+## Conclusion
+
+In this study I set out to find a new a better way to predict forest fires. Unfortunately I was unable to draw a clear conclusion from this study. While the FWI outperformed my raw data method in Bejaia, the two predictors has similar accuracy in Sidi Bel-abbas suggesting the feasibility of a regression approach may be dependent on the climate. This conclusion is supported by our hypothesis testing that proved fires start under different conditions in different climates. Overall FWI preformed the best in all regions and maintains the best metric for predicting fires in both climates. 
+
+However my study was limited and more research needs be done on this topic. My study was limited to a data set consisting of two regions and only used regression for prediction. Following research should include more data from more climate and test the application of Machine Learning methods such as Random Forest Decision Tree and Neural Networks.
+
+### Citations
+Data set:
+Abid,  . (2019). Algerian Forest Fires [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5KW4N.
+
+Previous Work:
+Abid, Faroudja & Izeboudjen, Nouma. (2020). Predicting Forest Fire in Algeria Using Data Mining Techniques: Case Study of the Decision Tree Algorithm. 10.1007/978-3-030-36674-2_37. 
